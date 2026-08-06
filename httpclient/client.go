@@ -47,35 +47,37 @@ func New(opts ...Option) *Client {
 }
 
 // Get melakukan request GET. result diisi otomatis dari JSON response (boleh nil).
-func (c *Client) Get(ctx context.Context, endpoint string, result interface{}) (*Response, error) {
-	return c.Request(ctx, http.MethodGet, endpoint, nil, result)
+// reqOpts opsional: WithBasicAuth, WithBearerToken, WithRequestHeader, dst.
+func (c *Client) Get(ctx context.Context, endpoint string, result interface{}, reqOpts ...RequestOption) (*Response, error) {
+	return c.Request(ctx, http.MethodGet, endpoint, nil, result, reqOpts...)
 }
 
 // Post melakukan request POST dengan payload JSON (boleh nil jika tidak ada body).
-func (c *Client) Post(ctx context.Context, endpoint string, payload interface{}, result interface{}) (*Response, error) {
-	return c.Request(ctx, http.MethodPost, endpoint, payload, result)
+func (c *Client) Post(ctx context.Context, endpoint string, payload interface{}, result interface{}, reqOpts ...RequestOption) (*Response, error) {
+	return c.Request(ctx, http.MethodPost, endpoint, payload, result, reqOpts...)
 }
 
 // Put melakukan request PUT dengan payload JSON.
-func (c *Client) Put(ctx context.Context, endpoint string, payload interface{}, result interface{}) (*Response, error) {
-	return c.Request(ctx, http.MethodPut, endpoint, payload, result)
+func (c *Client) Put(ctx context.Context, endpoint string, payload interface{}, result interface{}, reqOpts ...RequestOption) (*Response, error) {
+	return c.Request(ctx, http.MethodPut, endpoint, payload, result, reqOpts...)
 }
 
 // Patch melakukan request PATCH dengan payload JSON.
-func (c *Client) Patch(ctx context.Context, endpoint string, payload interface{}, result interface{}) (*Response, error) {
-	return c.Request(ctx, http.MethodPatch, endpoint, payload, result)
+func (c *Client) Patch(ctx context.Context, endpoint string, payload interface{}, result interface{}, reqOpts ...RequestOption) (*Response, error) {
+	return c.Request(ctx, http.MethodPatch, endpoint, payload, result, reqOpts...)
 }
 
 // Delete melakukan request DELETE. payload opsional (boleh nil).
-func (c *Client) Delete(ctx context.Context, endpoint string, payload interface{}, result interface{}) (*Response, error) {
-	return c.Request(ctx, http.MethodDelete, endpoint, payload, result)
+func (c *Client) Delete(ctx context.Context, endpoint string, payload interface{}, result interface{}, reqOpts ...RequestOption) (*Response, error) {
+	return c.Request(ctx, http.MethodDelete, endpoint, payload, result, reqOpts...)
 }
 
-// Request adalah method inti: method, endpoint, payload (opsional), result (opsional).
-// Jika payload != nil, otomatis di-marshal ke JSON.
-// Jika result != nil dan response sukses, body otomatis di-unmarshal ke result.
-func (c *Client) Request(ctx context.Context, method, endpoint string, payload interface{}, result interface{}) (*Response, error) {
+// Request adalah method inti: method, endpoint, payload (opsional), result (opsional),
+// dan reqOpts untuk override header per-request (basic auth, bearer token, header custom).
+// Header di reqOpts akan menimpa header default Client jika key-nya sama.
+func (c *Client) Request(ctx context.Context, method, endpoint string, payload interface{}, result interface{}, reqOpts ...RequestOption) (*Response, error) {
 	fullURL := c.buildURL(endpoint)
+	rc := newRequestConfig(reqOpts...)
 
 	var rawBody []byte
 	if payload != nil {
@@ -105,9 +107,8 @@ func (c *Client) Request(ctx context.Context, method, endpoint string, payload i
 			bodyReader = bytes.NewReader(rawBody)
 		}
 
-		resp, err = c.doRequest(ctx, method, fullURL, bodyReader)
+		resp, err = c.doRequest(ctx, method, fullURL, bodyReader, rc.headers)
 		if err != nil {
-			// error koneksi (network), layak dicoba ulang jika retry aktif
 			if attempt == attempts-1 {
 				return nil, err
 			}
@@ -141,13 +142,18 @@ func (c *Client) Request(ctx context.Context, method, endpoint string, payload i
 	return resp, nil
 }
 
-func (c *Client) doRequest(ctx context.Context, method, url string, body io.Reader) (*Response, error) {
+// doRequest menggabungkan header default Client dengan header override per-request.
+// Header override (extraHeaders) menang jika ada key yang sama.
+func (c *Client) doRequest(ctx context.Context, method, url string, body io.Reader, extraHeaders map[string]string) (*Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("httpclient: gagal membuat request: %w", err)
 	}
 
 	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
+	for k, v := range extraHeaders {
 		req.Header.Set(k, v)
 	}
 
