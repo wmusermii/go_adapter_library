@@ -26,6 +26,7 @@ type Client struct {
 // New membuat instance Client baru dengan konfigurasi default,
 // lalu menerapkan semua Option yang diberikan.
 func New(opts ...Option) *Client {
+	fmt.Println("[DEBUG] httpclient.New() dipanggil")
 	c := &Client{
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
