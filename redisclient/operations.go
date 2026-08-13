@@ -489,3 +489,67 @@ func (c *Client) ReleaseLock(ctx context.Context, key string, token string) erro
 	}
 	return nil
 }
+
+// ==========================================================
+// KEY SCANNING (untuk mencari banyak key berdasarkan pola)
+// ==========================================================
+
+// Keys mencari semua key yang cocok dengan pola tertentu (misal "bds:profile:*").
+// Menggunakan SCAN (bukan KEYS) supaya tidak blocking walau data besar.
+func (c *Client) Keys(ctx context.Context, pattern string) ([]string, error) {
+	if c == nil || c.rdb == nil {
+		return nil, ErrNilClient
+	}
+	if pattern == "" {
+		return nil, ErrEmptyKey
+	}
+	ctx, cancel := c.contextWithTimeout(ctx)
+	defer cancel()
+
+	var keys []string
+	var cursor uint64
+
+	for {
+		batch, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, newOpError("SCAN", pattern, err)
+		}
+		keys = append(keys, batch...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return keys, nil
+}
+
+// MGet mengambil banyak value string sekaligus berdasarkan daftar key.
+// Value yang tidak ditemukan akan dikembalikan sebagai string kosong pada posisinya.
+func (c *Client) MGet(ctx context.Context, keys ...string) ([]string, error) {
+	if c == nil || c.rdb == nil {
+		return nil, ErrNilClient
+	}
+	if len(keys) == 0 {
+		return nil, ErrEmptyKey
+	}
+	ctx, cancel := c.contextWithTimeout(ctx)
+	defer cancel()
+
+	raw, err := c.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, newOpError("MGET", "", err)
+	}
+
+	result := make([]string, len(raw))
+	for i, v := range raw {
+		if v == nil {
+			result[i] = ""
+			continue
+		}
+		if s, ok := v.(string); ok {
+			result[i] = s
+		}
+	}
+	return result, nil
+}
